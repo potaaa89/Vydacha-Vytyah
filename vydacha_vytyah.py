@@ -89,6 +89,75 @@ class VytyahApp:
             messagebox.showerror("Доступ заборонено", "Неправильний пароль.")
         return False
 
+    def attach_context_menu(self, widget):
+        """Контекстне меню для полів введення: вирізати/копіювати/вставити."""
+        menu = tk.Menu(self.root, tearoff=0)
+        menu.add_command(label="Вирізати", command=lambda: widget.event_generate("<<Cut>>"))
+        menu.add_command(label="Копіювати", command=lambda: widget.event_generate("<<Copy>>"))
+        menu.add_command(label="Вставити", command=lambda: widget.event_generate("<<Paste>>"))
+        menu.add_separator()
+
+        def select_all():
+            try:
+                widget.select_range(0, "end")
+                widget.icursor("end")
+                widget.focus_set()
+            except (tk.TclError, AttributeError):
+                try:
+                    widget.event_generate("<<SelectAll>>")
+                except tk.TclError:
+                    pass
+
+        menu.add_command(label="Виділити все", command=select_all)
+
+        def show_menu(event):
+            widget.focus_set()
+            try:
+                menu.tk_popup(event.x_root, event.y_root)
+            finally:
+                menu.grab_release()
+
+        widget.bind("<Button-3>", show_menu)
+        # Explicit Windows shortcuts in editable fields.
+        widget.bind("<Control-c>", lambda event: (widget.event_generate("<<Copy>>"), "break")[1])
+        widget.bind("<Control-C>", lambda event: (widget.event_generate("<<Copy>>"), "break")[1])
+        widget.bind("<Control-v>", lambda event: (widget.event_generate("<<Paste>>"), "break")[1])
+        widget.bind("<Control-V>", lambda event: (widget.event_generate("<<Paste>>"), "break")[1])
+        widget.bind("<Control-x>", lambda event: (widget.event_generate("<<Cut>>"), "break")[1])
+        widget.bind("<Control-X>", lambda event: (widget.event_generate("<<Cut>>"), "break")[1])
+        widget.bind("<Control-a>", lambda event: (select_all(), "break")[1])
+        widget.bind("<Control-A>", lambda event: (select_all(), "break")[1])
+        widget.bind("<Shift-F10>", lambda event: show_menu(type("E", (), {
+            "x_root": widget.winfo_rootx() + 20,
+            "y_root": widget.winfo_rooty() + 20
+        })()))
+
+    def attach_context_menus_to_inputs(self, parent):
+        for child in parent.winfo_children():
+            if isinstance(child, (ttk.Entry, ttk.Combobox, tk.Entry, tk.Text)):
+                self.attach_context_menu(child)
+            self.attach_context_menus_to_inputs(child)
+
+    def copy_selected_row(self, _event=None):
+        selected = self.tree.selection()
+        if not selected:
+            return
+        values = self.tree.item(selected[0], "values")
+        self.root.clipboard_clear()
+        self.root.clipboard_append("\t".join(str(value) for value in values))
+        self.root.update()
+
+    def show_table_context_menu(self, event):
+        row = self.tree.identify_row(event.y)
+        if row:
+            self.tree.selection_set(row)
+        menu = tk.Menu(self.root, tearoff=0)
+        menu.add_command(label="Копіювати рядок", command=self.copy_selected_row)
+        try:
+            menu.tk_popup(event.x_root, event.y_root)
+        finally:
+            menu.grab_release()
+
     def _build_ui(self):
         outer = ttk.Frame(self.root, padding=16)
         outer.pack(fill="both", expand=True)
@@ -148,6 +217,10 @@ class VytyahApp:
         ttk.Button(bottom, text="Резервна копія", command=self.backup_db).pack(side="right")
         ttk.Button(bottom, text="Експорт Excel / CSV", command=self.export_records).pack(side="right", padx=7)
         ttk.Label(outer, text=f"Локальна база даних: {DB_PATH}", style="Sub.TLabel").pack(anchor="w", pady=(8, 0))
+        self.attach_context_menus_to_inputs(outer)
+        self.tree.bind("<Control-c>", self.copy_selected_row)
+        self.tree.bind("<Control-C>", self.copy_selected_row)
+        self.tree.bind("<Button-3>", self.show_table_context_menu)
 
     def parse_date(self, value):
         try: return datetime.strptime(value.strip(), "%d.%m.%Y").date().isoformat()
